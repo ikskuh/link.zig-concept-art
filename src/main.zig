@@ -11,6 +11,6 @@ pub fn main() !void {
     try link_zig.link(&linker);
 
     if (!linker.is_linked) {
-        linker.link();
+        _ = linker.link();
     }
 }

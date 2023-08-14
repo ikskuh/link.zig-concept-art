@@ -51,7 +51,7 @@ pub fn link(linker: *Linker) !void {
     const rodataseg = linker.addProgramHeader("rodataseg", .{ .load = true }); //   rodataseg PT_LOAD;
     const dataseg = linker.addProgramHeader("dataseg", .{ .load = true }); //       dataseg   PT_LOAD;
 
-    const section_alignment = 8;
+    const section_alignment = 16;
 
     // Forward declaration
     const data_begin = linker.declareSymbol("__start_data");
@@ -70,27 +70,30 @@ pub fn link(linker: *Linker) !void {
 
     // Sections:
 
-    const esp_hdr_sect = linker.createSection(".esphdr", .{ .header = hdrseg }); //             .esphdr : AT(0) { ... } :hdrseg
+    const esp_hdr_sect = linker.createSection(".esphdr", .{ .header = hdrseg, .fill = 0xFFFFFFFF }); //             .esphdr : AT(0) { ... } :hdrseg
 
-    const data_hdr_sect = linker.createSection(".espseg.1", .{ .header = dataseg }); //         .espseg.0 : AT(LOADADDR(.esphdr) + SIZEOF(.esphdr)) { ... } :hdrseg
-    const data_sect = linker.createSection(".data", .{ .header = dataseg }); //                 .data : AT(SIZEOF(.esphdr) + SIZEOF(.espseg.0)) { ... } :dataseg
+    const data_hdr_sect = linker.createSection(".espseg.1", .{ .header = dataseg, .fill = 0xFFFFFFFF }); //         .espseg.0 : AT(LOADADDR(.esphdr) + SIZEOF(.esphdr)) { ... } :hdrseg
+    const data_sect = linker.createSection(".data", .{ .header = dataseg, .fill = 0xFFFFFFFF }); //                 .data : AT(SIZEOF(.esphdr) + SIZEOF(.espseg.0)) { ... } :dataseg
 
-    const text_hdr_sect = linker.createSection(".espseg.0", .{ .header = codeseg }); //         .espseg.1 : AT(LOADADDR(.data) + SIZEOF(.data)) { ... } :codeseg
-    const text_sect = linker.createSection(".text", .{ .header = codeseg }); //                 .text : AT(LOADADDR(.espseg.1) + SIZEOF(.espseg.1)) { ... } :codeseg
+    const text_hdr_sect = linker.createSection(".espseg.0", .{ .header = codeseg, .fill = 0xFFFFFFFF }); //         .espseg.1 : AT(LOADADDR(.data) + SIZEOF(.data)) { ... } :codeseg
+    const text_sect = linker.createSection(".text", .{ .header = codeseg, .fill = 0xFFFFFFFF }); //                 .text : AT(LOADADDR(.espseg.1) + SIZEOF(.espseg.1)) { ... } :codeseg
 
-    const rodata_hdr_sect = linker.createSection(".espseg.2", .{ .header = rodataseg }); //     .espseg.2 : AT(LOADADDR(.text) + SIZEOF(.text)) { ... } :rodataseg
-    const initarray_sect = linker.createSection(".init_array", .{ .header = rodataseg }); //    .init_array : AT(LOADADDR(.espseg.2) + SIZEOF(.espseg.2)) { ... } :rodataseg
-    const rodata_sect = linker.createSection(".rodata", .{ .header = rodataseg }); //           .rodata : AT(LOADADDR(.init_array) + SIZEOF(.init_array)) { ... } :rodataseg
+    const rodata_hdr_sect = linker.createSection(".espseg.2", .{ .header = rodataseg, .fill = 0xFFFFFFFF }); //     .espseg.2 : AT(LOADADDR(.text) + SIZEOF(.text)) { ... } :rodataseg
+    const initarray_sect = linker.createSection(".init_array", .{ .header = rodataseg, .fill = 0xFFFFFFFF }); //    .init_array : AT(LOADADDR(.espseg.2) + SIZEOF(.espseg.2)) { ... } :rodataseg
+    const rodata_sect = linker.createSection(".rodata", .{ .header = rodataseg, .fill = 0xFFFFFFFF }); //           .rodata : AT(LOADADDR(.init_array) + SIZEOF(.init_array)) { ... } :rodataseg
 
     const bss_sect = linker.createSection(".bss", .{ .header = null });
-    const padding_checksum_sect = linker.createSection(".padding", .{ .header = null });
+    const padding_checksum_sect = linker.createSection(".padding", .{ .header = null, .fill = 0x00 });
 
     // SETUP RAM SYMBOLS
     {
-        linker.setVirtualAddress(start_sram); //                                                . = __start_sram;
+        linker.setVirtualAddress(&.{ .literal = start_sram }); //                                                . = __start_sram;
 
         // .data:
         {
+            data_sect.begin(); // for real linker scripts, we have to sadly use those
+            defer data_sect.end();
+
             _ = data_sect.defineSymbol("__start_data", .rel, 0, .{}); //                        __start_data = .;
             _ = data_sect.defineSymbol("__global_pointer$", .rel, 0, .{}); //                   __global_pointer$ = .;
 
@@ -105,6 +108,9 @@ pub fn link(linker: *Linker) !void {
 
         // .bss:
         {
+            bss_sect.begin(); // for real linker scripts, we have to sadly use those
+            defer bss_sect.end();
+
             _ = bss_sect.defineSymbol("__start_bss", .rel, 0, .{}); //                          __start_bss = .;
             bss_sect.includeSymbols(".sbss", .{}); //                                           *(.sbss)
             bss_sect.includeSymbols(".sbss*", .{}); //                                          *(.sbss*)
@@ -118,10 +124,13 @@ pub fn link(linker: *Linker) !void {
 
     // SETUP FLASH SYMBOLS
     {
-        linker.setVirtualAddress(start_xip); //                                                 . = __start_xip;
+        linker.setVirtualAddress(&.{ .literal = start_xip }); //                                                 . = __start_xip;
 
         // ESP32 firmware image format header:
         {
+            esp_hdr_sect.begin();
+            defer esp_hdr_sect.end();
+
             // File Header
             esp_hdr_sect.emitLiteral(u8, 0xE9); //                                              BYTE(0xE9);       /* Magic byte. */
             esp_hdr_sect.emitLiteral(u8, 3); //                                                 BYTE(3);          /* Segment count. */
@@ -145,6 +154,9 @@ pub fn link(linker: *Linker) !void {
 
         // header for .data:
         {
+            data_hdr_sect.begin();
+            defer data_hdr_sect.end();
+
             const section_length = data_hdr_sect.defineComputedSymbol(null, SymbolDistance{
                 .end = data_end,
                 .begin = data_begin,
@@ -155,10 +167,12 @@ pub fn link(linker: *Linker) !void {
         }
 
         // allocate space for .data, will be relocated via pyhsical_address to this place in flash later
-        linker.incrementVirtualAddress(data_sect.size); //                                      . = . + SIZEOF(.data);
+        linker.incrementVirtualAddress(data_sect.getSize()); //                                      . = . + SIZEOF(.data);
 
         // header for .text:
         {
+            data_hdr_sect.begin();
+            defer data_hdr_sect.end();
             const section_length = text_hdr_sect.defineComputedSymbol(null, SymbolDistance{
                 .end = text_end,
                 .begin = text_begin,
@@ -169,6 +183,8 @@ pub fn link(linker: *Linker) !void {
 
         // .text:
         {
+            data_hdr_sect.begin();
+            defer data_hdr_sect.end();
             _ = text_sect.defineSymbol("__start_text", .rel, 0, .{}); //                        __start_text = .;
             linker.alignVirtualAddress(256); //                                                 . = ALIGN(256);
 
@@ -182,6 +198,9 @@ pub fn link(linker: *Linker) !void {
 
         // header for .rodata:
         {
+            rodata_hdr_sect.begin();
+            defer rodata_hdr_sect.end();
+
             const section_length = rodata_hdr_sect.defineComputedSymbol(null, SymbolDistance{
                 .end = rodata_end,
                 .begin = rodata_begin,
@@ -194,58 +213,81 @@ pub fn link(linker: *Linker) !void {
         {
             _ = initarray_sect.defineSymbol("__start_rodata", .rel, 0, .{}); //                 __start_rodata = .;
             {
+                initarray_sect.begin();
+                defer initarray_sect.end();
+
                 _ = initarray_sect.defineSymbol("__start_init_array", .rel, 0, .{}); //         __start_init_array = .;
                 initarray_sect.includeSymbols(".init_array", .{ .keep = true }); //             KEEP(*(.init_array))
                 _ = initarray_sect.defineSymbol("__stop_init_array", .rel, 0, .{}); //          __stop_init_array = .;
             }
             {
+                rodata_sect.begin(); // .rodata : AT(0) {
+                defer rodata_sect.end(); // }
+
                 rodata_sect.includeSymbols(".rodata", .{}); //                                  *(.rodata)
                 rodata_sect.includeSymbols(".rodata*", .{}); //                                 *(.rodata*)
                 rodata_sect.includeSymbols(".srodata", .{}); //                                 *(.srodata)
                 rodata_sect.includeSymbols(".srodata*", .{}); //                                *(.srodata*)
 
                 linker.alignVirtualAddress(section_alignment); //                               . = ALIGN(__section_alignment);
-
             }
             _ = rodata_sect.defineSymbol("__stop_rodata", .rel, 0, .{}); //                     __stop_rodata = .;
+        }
+
+        // We are aligned to 16 bytes, so we just emit 16 times 0, the checksum is filled in post processing
+        {
+            padding_checksum_sect.begin();
+            defer padding_checksum_sect.end();
+
+            padding_checksum_sect.emitLiteral(u32, 0x00);
+            padding_checksum_sect.emitLiteral(u32, 0x00);
+            padding_checksum_sect.emitLiteral(u32, 0x00);
+            padding_checksum_sect.emitLiteral(u32, 0x00);
         }
     }
 
     // Define physical (binary image) layout
-    const checksum_sym = blk: {
+    {
+        const section_order = [_]*Linker.Section{
+            esp_hdr_sect,
+            data_hdr_sect,
+            text_sect,
+            text_hdr_sect,
+            data_sect,
+            rodata_hdr_sect,
+            initarray_sect,
+            rodata_sect,
+            padding_checksum_sect,
+        };
 
         // we load the sections one after another at address 0
-        var addr: u64 = 0;
+        var addr = linker.compute(&.{ .literal = 0 });
 
-        esp_hdr_sect.setPhysicalAddress(0); //       .esphdr : AT(0) {
-        addr += esp_hdr_sect.size;
-        data_hdr_sect.setPhysicalAddress(addr); //   .espseg.0 : AT(LOADADDR(.esphdr) + SIZEOF(.esphdr)) {
-        addr += data_hdr_sect.size;
-        text_sect.setPhysicalAddress(addr); //       .data : AT(SIZEOF(.esphdr) + SIZEOF(.espseg.0)) {
-        addr += text_sect.size;
-        text_hdr_sect.setPhysicalAddress(addr); //   .espseg.1 : AT(LOADADDR(.data) + SIZEOF(.data)) {
-        addr += text_hdr_sect.size;
-        data_sect.setPhysicalAddress(addr); //       .text : AT(LOADADDR(.espseg.1) + SIZEOF(.espseg.1)) {
-        addr += data_sect.size;
-        rodata_hdr_sect.setPhysicalAddress(addr); // .espseg.2 : AT(LOADADDR(.text) + SIZEOF(.text)) {
-        addr += rodata_hdr_sect.size;
-        initarray_sect.setPhysicalAddress(addr); //  .init_array : AT(LOADADDR(.espseg.2) + SIZEOF(.espseg.2)) {
-        addr += initarray_sect.size;
-        rodata_sect.setPhysicalAddress(addr); //     .rodata : AT(LOADADDR(.init_array) + SIZEOF(.init_array)) {
+        for (section_order) |sect| {
+            sect.setPhysicalAddress(addr);
+            addr = linker.compute(&.{ .add = .{ addr, sect.getSize() } });
+        }
+
+        // esp_hdr_sect.setPhysicalAddress(addr); //    .esphdr : AT(0) {
+        // addr = linker.compute(.{ .add = .{ addr, esp_hdr_sect.getSize() } });
+        // data_hdr_sect.setPhysicalAddress(addr); //   .espseg.0 : AT(LOADADDR(.esphdr) + SIZEOF(.esphdr)) {
+        // addr = linker.compute(.{ .add = .{ addr, data_hdr_sect.getSize() } });
+        // text_sect.setPhysicalAddress(addr); //       .data : AT(SIZEOF(.esphdr) + SIZEOF(.espseg.0)) {
+        // addr = linker.compute(.{ .add = .{ addr, text_sect.getSize() } });
+        // text_hdr_sect.setPhysicalAddress(addr); //   .espseg.1 : AT(LOADADDR(.data) + SIZEOF(.data)) {
+        // addr = linker.compute(.{ .add = .{ addr, text_hdr_sect.getSize() } });
+        // data_sect.setPhysicalAddress(addr); //       .text : AT(LOADADDR(.espseg.1) + SIZEOF(.espseg.1)) {
+        // addr = linker.compute(.{ .add = .{ addr, data_sect.getSize() } });
+        // rodata_hdr_sect.setPhysicalAddress(addr); // .espseg.2 : AT(LOADADDR(.text) + SIZEOF(.text)) {
+        // addr = linker.compute(.{ .add = .{ addr, rodata_hdr_sect.getSize() } });
+        // initarray_sect.setPhysicalAddress(addr); //  .init_array : AT(LOADADDR(.espseg.2) + SIZEOF(.espseg.2)) {
+        // addr = linker.compute(.{ .add = .{ addr, initarray_sect.getSize() } });
+        // rodata_sect.setPhysicalAddress(addr); //     .rodata : AT(LOADADDR(.init_array) + SIZEOF(.init_array)) {
 
         // https://docs.espressif.com/projects/esptool/en/latest/esp32/advanced-topics/firmware-image-format.html#footer
-        padding_checksum_sect.setPhysicalAddress(addr);
+        // padding_checksum_sect.setPhysicalAddress(addr);
 
-        {
-            while ((addr & 0x0F) != 0x0F) {
-                padding_checksum_sect.emitLiteral(u8, 0x00);
-                addr += 1;
-            }
-            const css = padding_checksum_sect.defineSymbol(null, .rel, 0, .{});
-            padding_checksum_sect.emitLiteral(u8, 0x00); // CHECKSUM
-            break :blk css;
-        }
-    };
+    }
 
     // ENTRY(_start)
     linker.setEntryPoint(entry_point);
@@ -281,7 +323,7 @@ pub fn link(linker: *Linker) !void {
         };
 
         artifact.writeIntLittle(
-            artifact.getPhysicalSymbolOffset(checksum_sym),
+            artifact.getPhysicalSectionOffset(padding_checksum_sect) + 15,
             u8,
             checksum,
         );

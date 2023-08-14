@@ -6,18 +6,25 @@ pub const BinaryFormat = enum { elf, binary, pe, ihex, wasm };
 
 pub const SymbolReference = enum { rel, abs };
 
+// public API:
+format: BinaryFormat,
+
+// internals
+allocator: std.mem.Allocator,
 is_linked: bool = false,
 
-format: BinaryFormat,
+fn create(linker: *Linker, comptime T: type) *T {
+    return linker.allocator.create(T) catch @panic("oom");
+}
 
 pub fn addMemory(linker: *Linker, options: struct {
     base: u64,
     length: u64,
     flags: Memory.Flags,
 }) *Memory {
+    const mem = linker.create(Memory);
     _ = options;
-    _ = linker;
-    return undefined;
+    return mem;
 }
 
 pub fn addProgramHeader(linker: *Linker, name: []const u8, options: struct { load: bool }) *ProgramHeader {
@@ -27,7 +34,7 @@ pub fn addProgramHeader(linker: *Linker, name: []const u8, options: struct { loa
     return undefined;
 }
 
-pub fn createSection(linker: *Linker, name: []const u8, options: struct { header: ?*ProgramHeader }) *Section {
+pub fn createSection(linker: *Linker, name: []const u8, options: struct { header: ?*ProgramHeader, fill: ?u32 = null }) *Section {
     _ = linker;
     _ = name;
     _ = options;
@@ -68,12 +75,12 @@ pub fn setEntryPoint(linker: *Linker, symbol: *Symbol) void {
     _ = linker;
 }
 
-pub fn setVirtualAddress(linker: *Linker, offset: u64) void {
+pub fn setVirtualAddress(linker: *Linker, offset: *const Expression) void {
     _ = offset;
     _ = linker;
 }
 
-pub fn incrementVirtualAddress(linker: *Linker, increment: u64) void {
+pub fn incrementVirtualAddress(linker: *Linker, increment: *const Expression) void {
     _ = increment;
     _ = linker;
 }
@@ -82,6 +89,24 @@ pub fn alignVirtualAddress(linker: *Linker, alignment: u64) void {
     _ = alignment;
     _ = linker;
 }
+
+pub fn compute(linker: *Linker, value: *const Expression) *const Expression {
+    _ = value;
+    _ = linker;
+    return undefined;
+}
+
+pub const Expression = union(enum) {
+    literal: u64,
+    symbol: *Symbol,
+    add: [2]*const Expression,
+    sub: [2]*const Expression,
+    mul: [2]*const Expression,
+    div: [2]*const Expression,
+    mod: [2]*const Expression,
+    shl: [2]*const Expression,
+    shr: [2]*const Expression,
+};
 
 pub const Symbol = struct {
     linker: *Linker,
@@ -93,12 +118,31 @@ pub const Symbol = struct {
 pub const Section = struct {
     linker: *Linker,
 
-    physical_address: u64,
-    virtual_addresS: u64,
-    size: u64,
+    pub fn begin(section: *Section) void {
+        _ = section;
+    }
+    pub fn end(section: *Section) void {
+        _ = section;
+    }
 
-    pub fn setPhysicalAddress(section: *Section, load_addr: u64) void {
-        section.physical_address = load_addr;
+    pub fn getPhysicalAddress(section: *Section) *const Expression {
+        _ = section;
+        return undefined;
+    }
+
+    pub fn getVirtualAddress(section: *Section) *const Expression {
+        _ = section;
+        return undefined;
+    }
+
+    pub fn getSize(section: *Section) *const Expression {
+        _ = section;
+        return undefined;
+    }
+
+    pub fn setPhysicalAddress(section: *Section, expr: *const Expression) void {
+        _ = expr;
+        _ = section;
     }
 
     pub fn includeSymbols(section: *Section, glob: []const u8, options: struct { keep: bool = false }) void {
@@ -164,6 +208,18 @@ pub const Artifact = struct {
     pub fn getPhysicalSymbolOffset(artifact: *Artifact, symbol: *Symbol) u64 {
         _ = artifact;
         _ = symbol;
+        return undefined;
+    }
+
+    pub fn getVirtualSectionOffset(artifact: *Artifact, symbol: *Symbol) u64 {
+        _ = artifact;
+        _ = symbol;
+        return undefined;
+    }
+
+    pub fn getPhysicalSectionOffset(artifact: *Artifact, section: *Section) u64 {
+        _ = section;
+        _ = artifact;
         return undefined;
     }
 
